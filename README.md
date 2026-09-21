@@ -81,22 +81,22 @@ Meridian Match follows a modular, decoupled architecture where data flows seamle
 
 Every client requirement and supplier offering is evaluated across six orthogonal commercial dimensions:
 
-$$\text{Base Score} = 0.40 \cdot S_{\text{product}} + 0.15 \cdot S_{\text{cat}} + 0.15 \cdot S_{\text{qty}} + 0.15 \cdot S_{\text{budget}} + 0.10 \cdot S_{\text{delivery}} + 0.05 \cdot S_{\text{loc}}$$
+$$\text{Base Score} = 0.40 \cdot S_{\text{product}} + 0.15 \cdot S_{\text{category}} + 0.15 \cdot S_{\text{quantity}} + 0.15 \cdot S_{\text{budget}} + 0.10 \cdot S_{\text{delivery}} + 0.05 \cdot S_{\text{location}}$$
 
-1. **Semantic Product Similarity ($40\%$)**: TF-IDF cosine similarity between client requirement descriptions and supplier product offerings.
-2. **Category Match ($15\%$)**: $100\%$ for exact sector match; $0\%$ for sector mismatch.
-3. **Quantity Alignment ($15\%$)**: Ratio of supplier available capacity to client required volume (capped at $100\%$; smooth linear degradation when below requirement).
-4. **Dual-Path Budget Fit ($15\%$)**: Interval overlap scoring supporting both direct per-unit price ranges and total project budget scaling:
+1. **Semantic Product Similarity (40%)**: TF-IDF cosine similarity between client requirement descriptions and supplier product offerings.
+2. **Category Match (15%)**: 100% for exact sector match; 0% for sector mismatch.
+3. **Quantity Alignment (15%)**: Ratio of supplier available capacity to client required volume (capped at 100%; smooth linear degradation when below requirement).
+4. **Dual-Path Budget Fit (15%)**: Interval overlap scoring supporting both direct per-unit price ranges and total project budget scaling:
    $$\text{Overlap}(A, B) = \frac{\max(0, \min(A_{\max}, B_{\max}) - \max(A_{\min}, B_{\min}))}{\max(A_{\max}, B_{\max}) - \min(A_{\min}, B_{\min})}$$
-5. **Delivery Timeline ($10\%$)**: $100\%$ if supplier lead time $\le$ client deadline; proportional penalty for extended timelines.
-6. **Location Proximity ($5\%$)**: $100\%$ for same city; $60\%$ for same state (e.g. Mumbai ↔ Pune); $20\%$ for interstate shipping within India.
+5. **Delivery Timeline (10%)**: 100% if supplier lead time $\le$ client deadline; proportional penalty for extended timelines.
+6. **Location Proximity (5%)**: 100% for same city; 60% for same state (e.g. Mumbai ↔ Pune); 20% for interstate shipping within India.
 
 ### Why TF-IDF + Cosine Similarity is Real Machine Learning / NLP
 
 Unlike naive keyword search (e.g. `substring in text`) which treats all words equally and fails on context, **TF-IDF (Term Frequency–Inverse Document Frequency)** is a statistical learning technique that vectors unstructured text in multidimensional space:
-- **Term Frequency ($\text{TF}$)**: Measures frequency of terms in a requirement with sublinear scaling ($\text{sublinear\_tf}=True$) to prevent repetitive spamming from skewing scores.
-- **Inverse Document Frequency ($\text{IDF}$)**: Evaluates term rarity across the entire database corpus. Common words across all suppliers (e.g., *"manufacturing"*, *"supplies"*, *"quality"*) receive low weights, while specific commercial keywords (e.g., *"organic cotton"*, *"microcontroller"*, *"biodegradable"*, *"FSSAI"*) receive high weights.
-- **Bigram Range ($(1, 2)$)**: Captures compound phrases like *"stainless steel"*, *"lead free"*, and *"cold pressed"*.
+- **Term Frequency (TF)**: Measures frequency of terms in a requirement with sublinear scaling (`sublinear_tf=True`) to prevent repetitive spamming from skewing scores.
+- **Inverse Document Frequency (IDF)**: Evaluates term rarity across the entire database corpus. Common words across all suppliers (e.g., *"manufacturing"*, *"supplies"*, *"quality"*) receive low weights, while specific commercial keywords (e.g., *"organic cotton"*, *"microcontroller"*, *"biodegradable"*, *"FSSAI"*) receive high weights.
+- **Bigram Range (1, 2)**: Captures compound phrases like *"stainless steel"*, *"lead free"*, and *"cold pressed"*.
 
 ### The Constraint Parser: Meaningful AI Reasoning Layer
 
@@ -107,9 +107,9 @@ Beyond raw statistical similarity, commercial procurement requires **prerequisit
    - **Nice-to-Haves**: Detected via preference triggers (`prefer`, `ideally`, `bonus if`, `nice to have`, `optional`).
 2. **Entity & Acronym Validation**: Identifies industry standards (e.g., `GOTS`, `ISO 9001`, `RoHS`, `FSC`, `FSSAI`, `BIFMA`, `CE`, `REACH`, `GMP`, `UL`) and verifies their presence in the supplier's verified capabilities text.
 3. **Score Penalties & Bonuses**:
-   - **Unmet Deal-Breakers**: Multiplies the entire match score by **$0.40\times$** (a $40\%$ penalty multiplier). Even a semantically similar supplier will see their score drop from $85\%$ to $34\%$ if they fail a mandatory certification.
-   - **Satisfied Nice-to-Haves**: Adds **$+5$ bonus points** (capped at $100\%$).
-4. **Explainability**: Every match produces an itemized explanation record stored in the database, viewable in the portal UI with $\checkmark$ and $\triangle$ status indicators.
+   - **Unmet Deal-Breakers**: Multiplies the entire match score by **`0.40×`** (a 40% penalty multiplier). Even a semantically similar supplier will see their score drop from 85% to 34% if they fail a mandatory certification.
+   - **Satisfied Nice-to-Haves**: Adds **`+5` bonus points** (capped at 100%).
+4. **Explainability**: Every match produces an itemized explanation record stored in the database, viewable in the portal UI with status check indicators.
 
 ---
 
