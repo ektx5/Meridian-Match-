@@ -78,6 +78,13 @@ with st.sidebar:
 
 # ── Portal Header ─────────────────────────────────────────────────────────────
 st.markdown("<h1 class='bb-heading'>Client Portal</h1>", unsafe_allow_html=True)
+if "portal_status_message" in st.session_state:
+    succ, msg = st.session_state.pop("portal_status_message")
+    if succ:
+        st.markdown(f"<div class='bb-success-box'>✅ {msg}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='bb-info-box'>📧 {msg}</div>", unsafe_allow_html=True)
+
 client_row = get_client_by_user(user_id)
 is_complete = bool(client_row and client_row["profile_complete"])
 
@@ -205,11 +212,11 @@ with tab_form:
                     create_notifications_for_matches(matches, client_db_row, supplier_rows)
 
                     # Part 5 — send email if configured
-                    email_status = None
+                    email_result = None
                     if notification_email.strip():
                         for m in matches:
                             if m["overall_score"] >= SCORE_THRESHOLD:
-                                sent = send_match_email(
+                                email_result = send_match_email(
                                     to_email=notification_email.strip(),
                                     role="client",
                                     match_score=m["overall_score"],
@@ -217,17 +224,14 @@ with tab_form:
                                     explanation=m["explanation_text"],
                                     top_terms=m.get("top_terms"),
                                 )
-                                email_status = sent
                                 break  # one email per submission
                 finally:
                     conn.close()
 
-            st.markdown("<div class='bb-success-box'>✅ Profile updated & AI matching complete! View matches below.</div>", unsafe_allow_html=True)
-            if notification_email.strip():
-                if email_status:
-                    st.markdown("<div class='bb-success-box'>✅ Email notification sent</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown("<div class='bb-info-box'>📧 Email not configured (demo mode)</div>", unsafe_allow_html=True)
+            if email_result:
+                st.session_state["portal_status_message"] = email_result
+            else:
+                st.session_state["portal_status_message"] = (True, "Profile updated & AI matching complete! View your matches below.")
             st.rerun()
 
 # ── Tab 2: My Matches ─────────────────────────────────────────────────────────
@@ -314,10 +318,7 @@ with tab_matches:
                         ]
                         for lbl, val in factors:
                             tip = factor_tooltips.get(lbl, "")
-                            st.markdown(
-                                f"<span title='{tip}' style='cursor:help;'>{score_bar_html(lbl + ' ⓘ', val)}</span>",
-                                unsafe_allow_html=True,
-                            )
+                            st.markdown(score_bar_html(lbl + " ⓘ", val, tooltip=tip), unsafe_allow_html=True)
 
                         # Part 1 — semantic score bar (informational)
                         sem_val = m["product_fit_semantic_score"] if "product_fit_semantic_score" in m.keys() else None

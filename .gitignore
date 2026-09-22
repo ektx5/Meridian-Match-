@@ -12,6 +12,10 @@ ENV/
 # Streamlit local runtime state
 .streamlit/credentials.toml
 
+# Environment variables & secrets
+.env
+.env.local
+
 # SQLite temporary WAL/SHM files
 *.db-journal
 *.db-wal
