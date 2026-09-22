@@ -294,15 +294,6 @@ with tab_matches:
 
                     with c_right:
                         st.markdown("<b style='font-size:0.85rem;color:#1B4332;'>Multi-Factor Breakdown</b>", unsafe_allow_html=True)
-                        # Part 6.4 — tooltip info icons
-                        factor_tooltips = {
-                            "🧠 Product Fit":        "How closely the product descriptions match",
-                            "🏷 Category Match":     "Whether client and supplier share the same category",
-                            "📦 Quantity Fit":       "Whether supplier MOQ fits within client's needed range",
-                            "💰 Budget Fit":         "Whether the price range overlaps between client and supplier",
-                            "🚚 Delivery Timeline":  "Whether the supplier's lead time meets the client's deadline",
-                            "📍 Location Proximity": "Extra weight if client and supplier are in the same city",
-                        }
                         factors = [
                             ("🧠 Product Fit",        m["product_fit_score"]),
                             ("🏷 Category Match",     m["category_score"]),
@@ -311,9 +302,7 @@ with tab_matches:
                             ("🚚 Delivery Timeline",   m["delivery_score"]),
                             ("📍 Location Proximity",  m["location_score"]),
                         ]
-                        for lbl, val in factors:
-                            tip = factor_tooltips.get(lbl, "")
-                            st.markdown(score_bar_html(lbl + " ⓘ", val, tooltip=tip), unsafe_allow_html=True)
+                        st.markdown("".join(score_bar_html(lbl, val) for lbl, val in factors), unsafe_allow_html=True)
 
                         # Part 1 — semantic score bar
                         sem_val = m["product_fit_semantic_score"] if "product_fit_semantic_score" in m.keys() else None

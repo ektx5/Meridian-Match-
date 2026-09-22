@@ -251,14 +251,13 @@ def inject_css() -> None:
     st.markdown(css, unsafe_allow_html=True)
 
 
-def score_bar_html(label: str, score: float, max_score: float = 100.0, tooltip: str = "") -> str:
+def score_bar_html(label: str, score: float, max_score: float = 100.0) -> str:
     """Return an HTML snippet rendering a labelled score bar in the BB style."""
     pct = min(100.0, max(0.0, (score / max_score) * 100))
-    title_attr = f' title="{html.escape(tooltip, quote=True)}" style="cursor:help;"' if tooltip else ""
     return (
-        f"<div style='margin-bottom:3px;font-size:0.81rem;color:#52796F;'{title_attr}>"
+        f"<div style='margin-bottom:3px;font-size:0.81rem;color:#52796F;'>"
         f"<b>{label}</b> — {score:.1f}%</div>"
-        f"<div class='bb-bar-wrap'{title_attr}><div class='bb-bar-fill' style='width:{pct:.1f}%'></div></div>"
+        f"<div class='bb-bar-wrap'><div class='bb-bar-fill' style='width:{pct:.1f}%'></div></div>"
     )
 
 
