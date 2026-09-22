@@ -3,13 +3,19 @@ core/matching_engine.py — Meridian Match AI Matching Engine
 
 Implements a 6-factor weighted scoring model combining TF-IDF cosine similarity
 with structured rule-based compatibility and NLP constraint verification.
-Factor weights:
+Factor weights (adaptive via learning_engine, defaults below):
   1. Semantic Product Similarity:  40%
   2. Category Match:               15%
   3. Quantity Fit:                 15%
   4. Budget Compatibility:         15%
   5. Delivery Timeline Fit:        10%
   6. Location Proximity:            5%
+
+Parts 1 & 2 additions:
+  - product_fit_semantic_score: informational sentence-embedding similarity (NOT blended)
+  - top_terms: top shared TF-IDF terms surfaced in match explanations
+Part 4 addition:
+  - get_active_weights() replaces hardcoded W_* constants at run time
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from core.database import (
     upsert_match,
     insert_match_explanation,
     delete_explanations_for_match,
+    get_connection,
 )
 from core.constraint_parser import (
     parse_constraints,
@@ -35,14 +42,16 @@ from core.constraint_parser import (
     build_explanation_sentence,
     Constraint,
 )
+from core.learning_engine import get_active_weights, DEFAULT_WEIGHTS
 from theme import LOCATION_STATES
 
-W_PRODUCT   = 0.40
-W_CATEGORY  = 0.15
-W_QUANTITY  = 0.15
-W_BUDGET    = 0.15
-W_DELIVERY  = 0.10
-W_LOCATION  = 0.05
+# ── Hardcoded default weights (used when no learned weights exist) ─────────────
+W_PRODUCT   = DEFAULT_WEIGHTS["w_product"]
+W_CATEGORY  = DEFAULT_WEIGHTS["w_category"]
+W_QUANTITY  = DEFAULT_WEIGHTS["w_quantity"]
+W_BUDGET    = DEFAULT_WEIGHTS["w_budget"]
+W_DELIVERY  = DEFAULT_WEIGHTS["w_delivery"]
+W_LOCATION  = DEFAULT_WEIGHTS["w_location"]
 
 
 def _build_corpus(clients: list[sqlite3.Row], suppliers: list[sqlite3.Row]) -> tuple[list[str], list[str], list[str]]:
@@ -106,12 +115,45 @@ def _score_location(c_city: str, s_city: str) -> float:
     return 0.3
 
 
+def _top_shared_terms(
+    vectorizer: TfidfVectorizer,
+    client_vec: Any,
+    supplier_vec: Any,
+    top_k: int = 3,
+) -> list[str]:
+    """Return top_k feature names where both client and supplier have nonzero TF-IDF weight.
+
+    Uses element-wise minimum of the two sparse vectors as a proxy for shared importance.
+
+    Args:
+        vectorizer: Fitted TfidfVectorizer.
+        client_vec: Sparse row vector for the client.
+        supplier_vec: Sparse row vector for the supplier.
+        top_k: Number of top shared terms to return.
+
+    Returns:
+        List of up to top_k feature name strings.
+    """
+    try:
+        feature_names = np.array(vectorizer.get_feature_names_out())
+        c_arr = np.asarray(client_vec.todense()).flatten()
+        s_arr = np.asarray(supplier_vec.todense()).flatten()
+        shared = np.minimum(c_arr, s_arr)
+        top_indices = shared.argsort()[::-1][:top_k]
+        return [str(feature_names[i]) for i in top_indices if shared[i] > 0]
+    except Exception:
+        return []
+
+
 def _evaluate_and_save_pair(
     client: sqlite3.Row,
     supplier: sqlite3.Row,
     client_vec: Any,
     supplier_vec: Any,
     client_constraints: list[Constraint],
+    vectorizer: TfidfVectorizer,
+    weights: dict[str, float],
+    semantic_sim: float | None = None,
 ) -> dict[str, Any]:
     """Compute all 6 factors, apply constraint adjustments, and upsert match record."""
     sim = cosine_similarity(client_vec, supplier_vec)[0][0]
@@ -131,14 +173,23 @@ def _evaluate_and_save_pair(
     f6 = _score_location(client["location"], supplier["location"]) * 100.0
 
     base_score = (
-        W_PRODUCT * f1 + W_CATEGORY * f2 + W_QUANTITY * f3 +
-        W_BUDGET * f4 + W_DELIVERY * f5 + W_LOCATION * f6
+        weights["w_product"] * f1 + weights["w_category"] * f2 + weights["w_quantity"] * f3 +
+        weights["w_budget"] * f4 + weights["w_delivery"] * f5 + weights["w_location"] * f6
     )
 
     s_text = f"{supplier['product_offered']} {supplier['additional_notes'] or ''}"
     adj_score, penalty_applied, constraint_details = apply_constraints(base_score, client_constraints, s_text)
 
-    explanation = build_explanation_sentence(adj_score, f1, f4, f5, f3, constraint_details)
+    # ── Part 2: top shared TF-IDF terms ──────────────────────────────────────
+    top_terms_list = _top_shared_terms(vectorizer, client_vec, supplier_vec, top_k=3)
+    top_terms_str = ", ".join(top_terms_list) if top_terms_list else None
+
+    explanation = build_explanation_sentence(
+        adj_score, f1, f4, f5, f3, constraint_details, top_terms=top_terms_list
+    )
+
+    # ── Part 1: semantic score (informational only, NOT blended into weighted sum) ─
+    semantic_score = semantic_sim  # passed in from caller; may be None
 
     match_id = upsert_match(
         client_id=client["id"], supplier_id=supplier["id"],
@@ -147,6 +198,8 @@ def _evaluate_and_save_pair(
         budget_score=round(f4, 2), delivery_score=round(f5, 2),
         location_score=round(f6, 2), constraint_penalty_applied=int(penalty_applied),
         explanation_text=explanation,
+        product_fit_semantic_score=round(semantic_score * 100, 2) if semantic_score is not None else None,
+        top_terms=top_terms_str,
     )
 
     delete_explanations_for_match(match_id)
@@ -161,6 +214,8 @@ def _evaluate_and_save_pair(
         "budget_score": round(f4, 2), "delivery_score": round(f5, 2),
         "location_score": round(f6, 2), "constraint_penalty_applied": int(penalty_applied),
         "explanation_text": explanation, "constraint_details": constraint_details,
+        "product_fit_semantic_score": round(semantic_score * 100, 2) if semantic_score is not None else None,
+        "top_terms": top_terms_str,
     }
 
 
@@ -172,6 +227,10 @@ def run_matching_for_client(client_id: int) -> list[dict[str, Any]]:
     if not target or not suppliers:
         return []
 
+    conn = get_connection()
+    weights = get_active_weights(conn)
+    conn.close()
+
     corpus, _, _ = _build_corpus(clients, suppliers)
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=1, max_df=0.95, sublinear_tf=True)
     tfidf = vectorizer.fit_transform(corpus)
@@ -180,10 +239,26 @@ def run_matching_for_client(client_id: int) -> list[dict[str, Any]]:
     c_vec = tfidf[c_idx]
     c_constraints = parse_constraints(target["additional_notes"] or "")
 
+    # Semantic embeddings (Part 1) — computed in batch for efficiency
+    from core.embedding_engine import get_embeddings_batch, EMBEDDINGS_AVAILABLE
+    semantic_sims: list[float | None] = [None] * len(suppliers)
+    if EMBEDDINGS_AVAILABLE:
+        c_text = f"{target['product_requirement']} {target['additional_notes'] or ''}".strip()
+        s_texts = [f"{s['product_offered']} {s['additional_notes'] or ''}".strip() for s in suppliers]
+        all_texts = [c_text] + s_texts
+        embeddings = get_embeddings_batch(all_texts)
+        if embeddings is not None:
+            c_emb = embeddings[0]
+            for i in range(len(suppliers)):
+                semantic_sims[i] = float(np.dot(c_emb, embeddings[i + 1]))
+
     results = []
     for s_idx, supplier in enumerate(suppliers):
         s_vec = tfidf[len(clients) + s_idx]
-        res = _evaluate_and_save_pair(target, supplier, c_vec, s_vec, c_constraints)
+        res = _evaluate_and_save_pair(
+            target, supplier, c_vec, s_vec, c_constraints, vectorizer, weights,
+            semantic_sim=semantic_sims[s_idx],
+        )
         results.append(res)
 
     results.sort(key=lambda x: x["overall_score"], reverse=True)
@@ -198,6 +273,10 @@ def run_matching_for_supplier(supplier_id: int) -> list[dict[str, Any]]:
     if not target or not clients:
         return []
 
+    conn = get_connection()
+    weights = get_active_weights(conn)
+    conn.close()
+
     corpus, _, _ = _build_corpus(clients, suppliers)
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=1, max_df=0.95, sublinear_tf=True)
     tfidf = vectorizer.fit_transform(corpus)
@@ -205,11 +284,27 @@ def run_matching_for_supplier(supplier_id: int) -> list[dict[str, Any]]:
     s_idx = next(i for i, s in enumerate(suppliers) if s["id"] == supplier_id)
     s_vec = tfidf[len(clients) + s_idx]
 
+    # Semantic embeddings — batch for all clients
+    from core.embedding_engine import get_embeddings_batch, EMBEDDINGS_AVAILABLE
+    semantic_sims: list[float | None] = [None] * len(clients)
+    if EMBEDDINGS_AVAILABLE:
+        s_text = f"{target['product_offered']} {target['additional_notes'] or ''}".strip()
+        c_texts = [f"{c['product_requirement']} {c['additional_notes'] or ''}".strip() for c in clients]
+        all_texts = c_texts + [s_text]
+        embeddings = get_embeddings_batch(all_texts)
+        if embeddings is not None:
+            s_emb = embeddings[-1]
+            for i in range(len(clients)):
+                semantic_sims[i] = float(np.dot(embeddings[i], s_emb))
+
     results = []
     for c_idx, client in enumerate(clients):
         c_vec = tfidf[c_idx]
         c_constraints = parse_constraints(client["additional_notes"] or "")
-        res = _evaluate_and_save_pair(client, target, c_vec, s_vec, c_constraints)
+        res = _evaluate_and_save_pair(
+            client, target, c_vec, s_vec, c_constraints, vectorizer, weights,
+            semantic_sim=semantic_sims[c_idx],
+        )
         results.append(res)
 
     results.sort(key=lambda x: x["overall_score"], reverse=True)
@@ -223,17 +318,37 @@ def run_full_matching() -> int:
     if not clients or not suppliers:
         return 0
 
+    conn = get_connection()
+    weights = get_active_weights(conn)
+    conn.close()
+
     corpus, _, _ = _build_corpus(clients, suppliers)
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=1, max_df=0.95, sublinear_tf=True)
     tfidf = vectorizer.fit_transform(corpus)
+
+    # Semantic embeddings — full batch
+    from core.embedding_engine import get_embeddings_batch, EMBEDDINGS_AVAILABLE
+    all_texts = [
+        f"{c['product_requirement']} {c['additional_notes'] or ''}".strip() for c in clients
+    ] + [
+        f"{s['product_offered']} {s['additional_notes'] or ''}".strip() for s in suppliers
+    ]
+    embeddings = get_embeddings_batch(all_texts) if EMBEDDINGS_AVAILABLE else None
 
     count = 0
     for c_idx, client in enumerate(clients):
         c_vec = tfidf[c_idx]
         c_constraints = parse_constraints(client["additional_notes"] or "")
+        c_emb = embeddings[c_idx] if embeddings is not None else None
         for s_idx, supplier in enumerate(suppliers):
             s_vec = tfidf[len(clients) + s_idx]
-            _evaluate_and_save_pair(client, supplier, c_vec, s_vec, c_constraints)
+            semantic_sim: float | None = None
+            if c_emb is not None and embeddings is not None:
+                semantic_sim = float(np.dot(c_emb, embeddings[len(clients) + s_idx]))
+            _evaluate_and_save_pair(
+                client, supplier, c_vec, s_vec, c_constraints, vectorizer, weights,
+                semantic_sim=semantic_sim,
+            )
             count += 1
 
     return count

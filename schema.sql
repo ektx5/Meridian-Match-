@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS clients (
     delivery_days INTEGER DEFAULT 0,
     additional_notes TEXT DEFAULT '',
     profile_complete INTEGER DEFAULT 0,
+    notification_email TEXT,
+    predicted_category TEXT,
+    category_confidence REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -40,6 +43,9 @@ CREATE TABLE IF NOT EXISTS suppliers (
     delivery_days INTEGER DEFAULT 0,
     additional_notes TEXT DEFAULT '',
     profile_complete INTEGER DEFAULT 0,
+    notification_email TEXT,
+    predicted_category TEXT,
+    category_confidence REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -56,6 +62,8 @@ CREATE TABLE IF NOT EXISTS matches (
     location_score REAL NOT NULL,
     constraint_penalty_applied INTEGER DEFAULT 0,
     explanation_text TEXT,
+    product_fit_semantic_score REAL,
+    top_terms TEXT,
     status TEXT DEFAULT 'Pending' CHECK(status IN ('Pending','Contacted','Confirmed','Rejected')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(client_id, supplier_id)
@@ -78,4 +86,15 @@ CREATE TABLE IF NOT EXISTS notifications (
     message TEXT NOT NULL,
     is_read INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS learned_weights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    computed_at TEXT,
+    w_product REAL,
+    w_category REAL,
+    w_quantity REAL,
+    w_budget REAL,
+    w_delivery REAL,
+    w_location REAL
 );
