@@ -591,5 +591,44 @@ def _seed_notifications() -> None:
         conn.close()
 
 
+def seed_match_statuses() -> None:
+    """Part 4 — Seed realistic Confirmed/Rejected statuses for learning engine training.
+
+    Seeds at least 20 matches with status labels based on score thresholds:
+      - overall_score >= 70 → Confirmed (high-score pairs = real success)
+      - overall_score <= 40 → Rejected  (low-score pairs = real failure)
+      - 40 < score < 70    → left as Pending
+    This gives the LogisticRegression meaningful training signal.
+    """
+    conn = get_connection()
+    try:
+        matches = conn.execute(
+            "SELECT id, overall_score FROM matches ORDER BY overall_score DESC"
+        ).fetchall()
+
+        if not matches:
+            print("  [skip] No matches found — run seed() first")
+            return
+
+        confirmed_count = 0
+        rejected_count = 0
+        for m in matches:
+            score = m["overall_score"]
+            mid = m["id"]
+            if score >= 70 and confirmed_count < 15:
+                conn.execute("UPDATE matches SET status='Confirmed' WHERE id=?", (mid,))
+                confirmed_count += 1
+            elif score <= 40 and rejected_count < 10:
+                conn.execute("UPDATE matches SET status='Rejected' WHERE id=?", (mid,))
+                rejected_count += 1
+
+        conn.commit()
+        total = confirmed_count + rejected_count
+        print(f"  [ok] Seeded {total} match statuses: {confirmed_count} Confirmed, {rejected_count} Rejected")
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     seed()
+    seed_match_statuses()
