@@ -3,6 +3,8 @@ pages/3_Client_Portal.py — Meridian Match Client Portal
 
 Post-login portal for clients to submit product requirements,
 view AI-matched suppliers with 6-factor breakdowns, and manage notifications.
+Includes: semantic score bar, top-terms display, category classifier warning,
+email notification on match, UX polish (colored borders, tooltips, empty states).
 """
 
 from __future__ import annotations
@@ -22,8 +24,10 @@ from core.notifications import (
     get_unread_count,
     mark_all_read,
     mark_notification_read,
-    create_match_notifications,
+    SCORE_THRESHOLD,
+    create_notifications_for_matches,
 )
+from core.email_service import send_match_email
 from theme import inject_css, logo_html, score_bar_html, CATEGORIES, QUANTITY_UNITS, LOCATIONS
 
 st.set_page_config(page_title="Client Portal — Meridian Match", page_icon="📋", layout="wide")
@@ -127,6 +131,12 @@ with tab_form:
             height=90,
             help="Keywords like 'must', 'mandatory', 'required', 'only' trigger deal-breakers. 'prefer', 'ideally' trigger nice-to-haves.",
         )
+        # Part 5 — optional notification email
+        notification_email = st.text_input(
+            "Notification Email (optional)",
+            value=client_row["notification_email"] if client_row and client_row["notification_email"] else "",
+            placeholder="you@email.com — receive match alerts by email",
+        )
         submitted = st.form_submit_button("🔍 Submit & Find Matches", use_container_width=True)
 
     if submitted:
@@ -141,6 +151,26 @@ with tab_form:
             for e in errors:
                 st.markdown(f"<div class='bb-warn-box'>⚠️ {e}</div>", unsafe_allow_html=True)
         else:
+            # Part 3 — category classifier advisory warning
+            try:
+                from core.category_classifier import train_classifier, predict_category
+                from core.database import get_connection as _gc
+                _conn = _gc()
+                clf_pipeline = train_classifier(_conn)
+                _conn.close()
+                if clf_pipeline is not None:
+                    combined_text = f"{product_requirement.strip()} {additional_notes.strip()}"
+                    pred_cat, pred_conf = predict_category(combined_text, clf_pipeline)
+                    if pred_cat and pred_cat != category and pred_conf > 0.6:
+                        st.markdown(
+                            f"<div class='bb-warn-box'>⚠️ Our classifier thinks this profile may belong to "
+                            f"<b>{pred_cat}</b> (confidence: {pred_conf*100:.0f}%). You selected <b>{category}</b>. "
+                            f"If that's intentional, no action needed.</div>",
+                            unsafe_allow_html=True,
+                        )
+            except Exception:
+                pred_cat, pred_conf = None, None
+
             with st.spinner("Analyzing requirements and running AI matching engine..."):
                 client_id = save_or_update_client(
                     user_id=user_id, company_name=company_name.strip(),
@@ -149,37 +179,54 @@ with tab_form:
                     budget_min=float(budget_min), budget_max=float(budget_max),
                     location=location, delivery_days=int(delivery_days),
                     additional_notes=additional_notes.strip(),
+                    notification_email=notification_email.strip() or None,
                 )
                 st.session_state["linked_id"] = client_id
                 matches = run_matching_for_client(client_id)
 
-                # Send notifications for matches > 60
+                # Bug 0.2/0.3 — use deduped create_notifications_for_matches + SCORE_THRESHOLD
                 conn = get_connection()
                 try:
-                    for m in matches:
-                        if m["overall_score"] >= 60:
-                            s_row = conn.execute("SELECT user_id FROM suppliers WHERE id=?", (m["supplier_id"],)).fetchone()
-                            if s_row:
-                                create_match_notifications(
-                                    client_id=client_id, supplier_id=m["supplier_id"],
-                                    match_id=m["match_id"], score=m["overall_score"],
-                                    explanation=m["explanation_text"], client_user_id=user_id,
-                                    supplier_user_id=s_row["user_id"],
+                    supplier_rows = {
+                        r["id"]: r for r in conn.execute("SELECT * FROM suppliers").fetchall()
+                    }
+                    client_db_row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+                    create_notifications_for_matches(matches, client_db_row, supplier_rows)
+
+                    # Part 5 — send email if configured
+                    email_status = None
+                    if notification_email.strip():
+                        for m in matches:
+                            if m["overall_score"] >= SCORE_THRESHOLD:
+                                sent = send_match_email(
+                                    to_email=notification_email.strip(),
+                                    role="client",
+                                    match_score=m["overall_score"],
+                                    partner_name=m["supplier_name"],
+                                    explanation=m["explanation_text"],
+                                    top_terms=m.get("top_terms"),
                                 )
+                                email_status = sent
+                                break  # one email per submission
                 finally:
                     conn.close()
 
             st.markdown("<div class='bb-success-box'>✅ Profile updated & AI matching complete! View matches below.</div>", unsafe_allow_html=True)
+            if notification_email.strip():
+                if email_status:
+                    st.markdown("<div class='bb-success-box'>✅ Email notification sent</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown("<div class='bb-info-box'>📧 Email not configured (demo mode)</div>", unsafe_allow_html=True)
             st.rerun()
 
 # ── Tab 2: My Matches ─────────────────────────────────────────────────────────
 with tab_matches:
     if not is_complete or not client_row:
+        # Part 6.2 — empty state
         st.markdown(
-            "<div class='bb-card' style='text-align:center;padding:2.5rem;'>"
-            "<div style='font-size:2.5rem;'>📭</div>"
-            "<h3>No matches yet</h3>"
-            "<p style='color:#52796F;'>Please submit your product requirement in the form tab to find matching suppliers.</p>"
+            "<div class='bb-info-box' style='text-align:center;padding:2rem;'>"
+            "<div style='font-size:2rem;'>📭</div>"
+            "<b>No matches yet.</b> Complete your profile and submit to find matching suppliers."
             "</div>",
             unsafe_allow_html=True,
         )
@@ -189,16 +236,34 @@ with tab_matches:
             st.markdown("<div class='bb-info-box'>No matching suppliers found yet. Re-run or check back soon!</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<h3>Top {len(matches)} AI-Matched Suppliers</h3>", unsafe_allow_html=True)
+
+            # Part 1 — check if any semantic scores exist
+            has_semantic = any(
+                m["product_fit_semantic_score"] is not None
+                for m in matches
+                if "product_fit_semantic_score" in m.keys()
+            )
+
             for i, m in enumerate(matches):
                 score = m["overall_score"]
                 flag = " ⚠️ Constraint Penalty" if m["constraint_penalty_applied"] else ""
                 icon = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "📌"
 
+                # Part 6.3 — color-coded left border
+                if score >= 80:
+                    border_color = "#C9A227"  # gold
+                elif score >= 60:
+                    border_color = "#52796F"  # sage
+                elif score < 45:
+                    border_color = "#9B2C2C"  # red
+                else:
+                    border_color = "transparent"
+
                 with st.expander(f"{icon} {m['supplier_name']} — Match Score: {score:.0f}%{flag}", expanded=(i == 0)):
                     c_left, c_right = st.columns([1.2, 1])
                     with c_left:
                         st.markdown(
-                            f"<div class='bb-card' style='margin-bottom:0.6rem;'>"
+                            f"<div class='bb-card' style='margin-bottom:0.6rem;border-left:4px solid {border_color};'>"
                             f"<b style='font-size:1.1rem;color:#1B4332;'>{m['supplier_name']}</b><br>"
                             f"<span style='font-size:0.85rem;color:#52796F;'>"
                             f"📦 <b>Offered:</b> {m['product_offered']}<br>"
@@ -212,17 +277,41 @@ with tab_matches:
                         st.markdown(f"<div class='bb-bar-wrap'><div class='bb-bar-fill' style='width:{score:.1f}%;'></div></div>", unsafe_allow_html=True)
                         st.markdown(f"<div style='font-size:0.85rem;color:#2B2B2B;margin-top:0.4rem;'>{m['explanation_text']}</div>", unsafe_allow_html=True)
 
+                        # Part 2 — top shared terms
+                        top_terms_val = m["top_terms"] if "top_terms" in m.keys() else None
+                        if top_terms_val:
+                            st.markdown(f"<div style='font-size:0.8rem;color:#52796F;margin-top:0.3rem;'>🔑 Key shared terms: <i>{top_terms_val}</i></div>", unsafe_allow_html=True)
+
                     with c_right:
                         st.markdown("<b style='font-size:0.85rem;color:#1B4332;'>Multi-Factor Breakdown</b>", unsafe_allow_html=True)
+                        # Part 6.4 — tooltip info icons on factor bars
+                        factor_tooltips = {
+                            "🧠 Product Similarity": "How closely the product descriptions match",
+                            "🏷 Category Match":     "Whether client and supplier share the same category",
+                            "📦 Quantity Fit":       "Whether supplier MOQ fits within client's needed range",
+                            "💰 Budget Fit":         "Whether the price range overlaps between client and supplier",
+                            "🚚 Delivery Timeline":  "Whether the supplier's lead time meets the client's deadline",
+                            "📍 Location Proximity": "Extra weight if client and supplier are in the same city",
+                        }
                         factors = [
                             ("🧠 Product Similarity", m["product_fit_score"]),
-                            ("🏷 Category Match", m["category_score"]),
-                            ("📦 Quantity Fit", m["quantity_score"]),
-                            ("💰 Budget Fit", m["budget_score"]),
-                            ("🚚 Delivery Timeline", m["delivery_score"]),
-                            ("📍 Location Proximity", m["location_score"]),
+                            ("🏷 Category Match",     m["category_score"]),
+                            ("📦 Quantity Fit",        m["quantity_score"]),
+                            ("💰 Budget Fit",          m["budget_score"]),
+                            ("🚚 Delivery Timeline",   m["delivery_score"]),
+                            ("📍 Location Proximity",  m["location_score"]),
                         ]
-                        st.markdown("".join(score_bar_html(lbl, val) for lbl, val in factors), unsafe_allow_html=True)
+                        for lbl, val in factors:
+                            tip = factor_tooltips.get(lbl, "")
+                            st.markdown(
+                                f"<span title='{tip}' style='cursor:help;'>{score_bar_html(lbl + ' ⓘ', val)}</span>",
+                                unsafe_allow_html=True,
+                            )
+
+                        # Part 1 — semantic score bar (informational)
+                        sem_val = m["product_fit_semantic_score"] if "product_fit_semantic_score" in m.keys() else None
+                        if sem_val is not None:
+                            st.markdown(score_bar_html("🔬 Deep Semantic Similarity", float(sem_val)), unsafe_allow_html=True)
 
                         exps = get_explanations_for_match(m["id"])
                         if exps:
