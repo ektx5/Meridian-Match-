@@ -82,8 +82,6 @@ if "portal_status_message" in st.session_state:
     succ, msg = st.session_state.pop("portal_status_message")
     if succ:
         st.markdown(f"<div class='bb-success-box'>✅ {msg}</div>", unsafe_allow_html=True)
-    else:
-        st.markdown(f"<div class='bb-info-box'>📧 {msg}</div>", unsafe_allow_html=True)
 
 supplier_row = get_supplier_by_user(user_id)
 is_complete = bool(supplier_row and supplier_row["profile_complete"])
