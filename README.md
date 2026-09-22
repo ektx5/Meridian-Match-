@@ -15,49 +15,50 @@ Meridian Match follows a modular, decoupled architecture where data flows seamle
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                           STREAMLIT CLIENT (UI)                         │
   │  Landing (app.py) │ Client Portal │ Supplier Portal │ Admin Dashboard   │
-  └────────────────────────┬──────────────────────────────────────▲─────────┘
-                           │                                      │
-              Form Submissions / Profile Updates      Real-Time Matches & KPIs
-                           │                                      │
-                           ▼                                      │
+  └─────────────┬─────────────────────────────────────────────────▲─────────┘
+                │ Form Submissions / Profile Updates              │ Real-Time Matches,
+                │ + Category Mismatch Advisory Warning            │ Semantic Bars & KPIs
+                ▼                                                 │
   ┌───────────────────────────────────────────────────────────────┴─────────┐
   │                    CORE DATA LAYER (core/database.py)                   │
   │  - Raw SQLite3 with Parameterized Queries (No ORM overhead)             │
-  │  - Tables: users, clients, suppliers, matches, explanations, notifs     │
-  └────────────────────────┬────────────────────────────────────────────────┘
-                           │
-             Unprocessed Client & Supplier Corpus
-                           │
-                           ▼
-  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  - Tables: users, clients, suppliers, matches, explanations,            │
+  │    notifications, learned_weights                                       │
+  └─────────────┬─────────────────────────────────────────────────▲─────────┘
+                │                                                 │
+                │ Corpus Descriptions & Attributes                │ Persists Matches,
+                ▼                                                 │ Top Terms, Semantics
+  ┌───────────────────────────────────────────────────────────────┴─────────┐
   │               AI MATCHING ENGINE (core/matching_engine.py)              │
   │                                                                         │
-  │   1. TF-IDF Matrix (1-2 ngrams, sublinear TF) → Cosine Similarity (40%) │
-  │   2. Structured Parametric Scoring:                                    │
-  │      - Category Match (15%)       - Quantity Alignment (15%)            │
-  │      - Dual-Path Budget Fit (15%) - Delivery Timeline (10%)             │
-  │      - Location Proximity (5%)                                         │
-  └────────────────────────┬────────────────────────────────────────────────┘
-                           │
-                 Raw Weighted Base Score (0–100)
-                           │
-                           ▼
+  │   1. TF-IDF Matrix (1-2 ngrams, sublinear TF) → Cosine Similarity       │
+  │   2. Dynamic Adaptive Weights (via core/learning_engine.py):            │
+  │      - Product Fit        - Category Match     - Quantity Fit           │
+  │      - Budget Overlap     - Delivery Timeline  - Location Proximity     │
+  │   3. Top-Terms Extraction (top-k shared features for explainability)    │
+  └─────────────┬───────────────────────────┬───────────────────────────────┘
+                │                           │
+                │ Raw Base Score            │ Unstructured Text
+                ▼                           ▼
+  ┌───────────────────────────┐  ┌──────────────────────────────────────────┐
+  │   NLP CONSTRAINT PARSER   │  │             EMBEDDING ENGINE             │
+  │ (core/constraint_parser)  │  │      (core/embedding_engine.py)          │
+  │ - Regex & Acronym Engine  │  │ - MiniLM SentenceTransformer Embeddings  │
+  │ - Deal-Breaker Penalties  │  │ - Dense Vector Cosine Similarity (Deep   │
+  │ - Nice-to-Have Bonuses    │  │   Semantic Score — Informational Layer)  │
+  └─────────────┬─────────────┘  └──────────┬───────────────────────────────┘
+                │                           │
+                └─────────────┬─────────────┘
+                              │ Adjusted Final Score + Semantic + Top Terms
+                              ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
-  │             NLP CONSTRAINT PARSER (core/constraint_parser.py)           │
-  │                                                                         │
-  │   - Regex & Acronym Extractor ("must", "mandatory", "GOTS", "ISO 9001") │
-  │   - Deal-Breaker Verification: Applies 0.40× Multiplier Penalty         │
-  │   - Nice-to-Have Verification: Adds +5 Point Compatibility Bonus        │
-  │   - Generates Plain-English Explainability Breakdown                    │
-  └────────────────────────┬────────────────────────────────────────────────┘
-                           │
-                 Final Score & Factor Breakdown
-                           │
-                           ▼
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │            PERSISTENCE & NOTIFICATIONS (core/notifications.py)          │
-  │  - Atomic UPSERT into `matches` and `match_explanations` tables         │
-  │  - Scores ≥ 60% trigger bidirectional in-app notification alerts       │
+  │         INTELLIGENT SERVICES & DISPATCH LAYER                           │
+  │  - Category Classifier (core/category_classifier.py): TF-IDF + Logistic │
+  │    Regression advisory mismatch warning and accuracy metric             │
+  │  - Adaptive Weight Learner (core/learning_engine.py): Logistic          │
+  │    Regression on Confirmed/Rejected match feedback                      │
+  │  - Notifications (core/notifications.py): Deduplicated in-app alerts    │
+  │  - Email Service (core/email_service.py): SMTP_SSL match notifications  │
   └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,9 +69,11 @@ Meridian Match follows a modular, decoupled architecture where data flows seamle
 | Component | Choice | Engineering Rationale |
 |---|---|---|
 | **UI Framework** | **Streamlit** (v1.32+) | Enables rapid, interactive full-stack Python development without the overhead of maintaining a separate JavaScript/React frontend, API serializers, or client-side state sync. Custom injected CSS (`theme.py`) provides an elegant Forest Green & Cream design system with Google Fonts (*Playfair Display* & *Inter*). |
-| **Data Storage** | **SQLite3** (`sqlite3` module) | Zero-setup, self-contained, serverless relational database engine. Accessed entirely via raw parameterized SQL queries for full transparency, ACID guarantees, and zero ORM abstraction overhead. Configured with WAL mode for fast concurrency. |
-| **AI / NLP Engine** | **scikit-learn** (`TfidfVectorizer` + `cosine_similarity`) | Provides genuine mathematical NLP representation across the full corpus vocabulary without requiring heavy GPU clusters, multi-gigabyte neural checkpoints, or external paid API dependencies. Runs in sub-millisecond execution times with 100% determinism and explainability. |
-| **Data Manipulation** | **pandas** & **numpy** | Utilized in the Admin Dashboard for high-performance tabular aggregations, score distribution histograms, and multi-dimensional registry filtering. |
+| **Data Storage** | **SQLite3** (`sqlite3` module) | Zero-setup, self-contained, serverless relational database engine. Accessed entirely via raw parameterized SQL queries for full transparency, ACID guarantees, and zero ORM abstraction overhead. Configured with WAL mode for fast concurrency and schema migrations. |
+| **AI / NLP Engine** | **scikit-learn** (`TfidfVectorizer` + `LogisticRegression`) | Provides genuine mathematical NLP representation across the full corpus vocabulary without requiring heavy GPU clusters. Powers TF-IDF cosine similarity, the Category Classifier pipeline, and the feedback-driven Adaptive Weight Learner. |
+| **Deep Semantics** | **sentence-transformers** (`all-MiniLM-L6-v2`) | Computes dense vector sentence embeddings for deep semantic similarity beyond lexical token overlap. Integrated as an informational comparison layer with graceful CPU fallback. |
+| **Transactional Email** | **smtplib** & **email** (Python stdlib) | Zero-dependency, built-in secure SSL email delivery (`SMTP_SSL`) for instant match dispatch. Gracefully defaults to demo mode when environment variables are unconfigured. |
+| **Data Manipulation** | **pandas** & **numpy** | Utilized in the Admin Dashboard for high-performance tabular aggregations, score distribution histograms, cross-validation metrics, and multi-dimensional registry filtering. |
 | **Authentication** | **Python `hashlib`** (SHA-256) | Clean, dependency-free credential hashing and session state authorization gating across Client, Supplier, and Admin views. |
 
 ---
@@ -182,32 +185,75 @@ The platform comes pre-seeded with test accounts across all roles:
 
 ---
 
-## 6. Future Scalability Roadmap
+## 6. Email / SMTP Setup
 
-For production deployment at enterprise scale (100,000+ active clients and suppliers), the architecture is designed to evolve cleanly:
+Meridian Match includes built-in email notifications via `smtplib` (`SMTP_SSL`) that fire whenever a newly created match satisfies the `SCORE_THRESHOLD` (≥ 60%).
 
-1. **Storage & Vector Indexing (PostgreSQL + pgvector)**:
-   - Transition from SQLite to PostgreSQL.
-   - Leverage the `pgvector` extension to store dense embeddings and execute Approximate Nearest Neighbor (ANN) indexing (HNSW / IVFFlat) directly in SQL queries with sub-millisecond query latency.
+### Demo Mode (Default)
+If no SMTP configuration is present, the platform operates in **Demo Mode**: email attempts log harmlessly to the application console without errors, displaying an `📧 Email not configured (demo mode)` indicator in the portal interface.
 
-2. **Deep Semantic Embeddings (Sentence-Transformers)**:
-   - Replace or ensemble TF-IDF with lightweight dense embedding models (e.g. `all-MiniLM-L6-v2` or `BGE-small-en-v1.5`).
-   - Enables conceptual understanding across synonyms (e.g., recognizing *"biodegradable mailers"* matches *"eco-friendly compostable courier bags"* without shared tokens).
+### Step-by-Step Configuration for Real Email Delivery
 
-3. **Asynchronous Task Queue (Celery + Redis)**:
-   - Decouple matching computations from HTTP request/response loops.
-   - When a client posts a requirement, a Celery worker recalculates match scores asynchronously in the background and pushes real-time WebSocket updates.
+1. **Copy the Environment Template**:
+   ```bash
+   cp .env.example .env
+   ```
 
-4. **Production Authentication & Security**:
-   - Implement JSON Web Tokens (JWT) with refresh token rotation and `bcrypt` / `argon2id` key derivation with unique cryptographic salts.
-   - Introduce Multi-Factor Authentication (MFA) and granular Role-Based Access Control (RBAC).
+2. **Populate `.env` with Your SMTP Credentials**:
+   ```ini
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=465
+   SMTP_USER=your@email.com
+   SMTP_PASS=your_app_password
+   ```
+   *Note: For Gmail, generate a 16-character **App Password** under Google Account → Security → 2-Step Verification → App passwords.*
 
-5. **Multi-Channel Transactional Notifications**:
-   - Integrate **SendGrid** / **Amazon SES** for email digest summaries when new qualified suppliers join.
-   - Integrate **Twilio** / **WhatsApp Business API** for instant match alerts and procurement dispatch.
+3. **Export Variables (or load into your shell / execution environment)**:
+   ```bash
+   # On Linux/macOS:
+   export $(grep -v '^#' .env | xargs)
+
+   # On Windows (PowerShell):
+   Get-Content .env | ForEach-Object {
+       if ($_ -match '^(.*?)=(.*)$') {
+           [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+       }
+   }
+   ```
+
+4. Provide an email address in the optional **"Notification Email"** input when submitting or updating your profile in either portal.
 
 ---
 
-## 7. License & Assessment Details
+## 7. Future Scalability Roadmap
 
-Developed for technical evaluation. Built with clean, maintainable, modular Python code with zero external API dependencies.
+The platform has progressed significantly from a baseline matching engine to an adaptive, multi-layered intelligent platform. The roadmap below highlights what is now **implemented** versus future architectural enhancements for enterprise scale (100,000+ active records):
+
+### Implemented Upgrades
+- [x] **Deep Semantic Similarity Layer (`core/embedding_engine.py`)**: MiniLM (`all-MiniLM-L6-v2`) sentence transformer embeddings running dense vector cosine similarity alongside TF-IDF.
+- [x] **Category Classifier & Advisory Validation (`core/category_classifier.py`)**: Multi-class logistic regression on free text to flag potential profile category mismatches before submission.
+- [x] **Feedback-Driven Adaptive Weight Learning (`core/learning_engine.py`)**: Machine learning optimization on Confirmed vs. Rejected match statuses to dynamically adjust factor weights.
+- [x] **Top-Terms Explainability Engine**: Real-time extraction of overlapping TF-IDF keywords to highlight *why* two businesses align.
+- [x] **Secure Transactional Email Dispatch (`core/email_service.py`)**: Out-of-the-box zero-dependency SMTP_SSL notifications.
+- [x] **Deduplicated Bidirectional Notifications**: True atomic UPSERT database operations preventing orphaned records or duplicate alerts.
+
+### Future Enterprise Scalability
+1. **PostgreSQL + pgvector Migration**:
+   - Transition from SQLite to PostgreSQL.
+   - Leverage `pgvector` to store 384-dimensional dense vectors with HNSW / IVFFlat indexing for sub-millisecond similarity scans across millions of rows.
+
+2. **Distributed Asynchronous Task Queue (Celery + Redis)**:
+   - Offload batch vectorization and re-matching to background workers.
+   - Deliver real-time WebSocket push updates to active client sessions.
+
+3. **Enterprise Authentication & Single Sign-On (SSO)**:
+   - Implement OAuth2 / SAML authentication, JWT session rotation, and multi-factor authentication (MFA).
+
+4. **Multi-Channel Mobile Messaging**:
+   - Integrate WhatsApp Business API and Twilio SMS for real-time mobile match alerts.
+
+---
+
+## 8. License & Assessment Details
+
+Developed for technical evaluation. Built with clean, maintainable, modular Python code.
