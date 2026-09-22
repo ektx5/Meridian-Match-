@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from typing import Any
 
 DEAL_BREAKER_TRIGGERS: list[str] = [
-    r"\bmust\b", r"\brequired\b", r"\bmandatory\b", r"\bonly\b",
-    r"\bno exceptions?\b", r"\bcertified\b", r"\bcertification\b",
+    r"\bmust\b", r"\brequir\w*\b", r"\bmandatory\b", r"\bonly\b",
+    r"\bno exceptions?\b", r"\bcertif\w*\b",
     r"\bstrictly\b", r"\bcompulsory\b", r"\bguaranteed\b",
 ]
 
@@ -173,6 +173,7 @@ def apply_constraints(
 def build_explanation_sentence(
     overall_score: float, product_fit: float, budget_score: float,
     delivery_score: float, quantity_score: float, constraint_details: list[dict[str, Any]],
+    top_terms: list[str] | None = None,
 ) -> str:
     """Build an auto-generated plain-English template summary of the match."""
     if overall_score >= 80:
@@ -216,5 +217,7 @@ def build_explanation_sentence(
         sentence += f" {' '.join(missed)}"
     if bonuses:
         sentence += f" {' '.join(bonuses)}"
+    if top_terms:
+        sentence += f" Key terms: {', '.join(top_terms)}."
 
     return sentence

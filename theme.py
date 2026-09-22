@@ -55,7 +55,7 @@ LOCATION_STATES: dict[str, str] = {
 
 
 def inject_css() -> None:
-    """Inject Bridge & Bloom custom CSS styling across all Streamlit components."""
+    """Inject Meridian Match custom CSS styling across all Streamlit components."""
     import streamlit as st
 
     css = (

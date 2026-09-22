@@ -46,16 +46,28 @@ def create_match_notifications(
             f"{explanation}"
         )
 
-        conn.execute(
-            """INSERT INTO notifications (user_role, user_id, match_id, message)
-               VALUES ('client', ?, ?, ?)""",
-            (client_user_id, match_id, client_msg),
-        )
-        conn.execute(
-            """INSERT INTO notifications (user_role, user_id, match_id, message)
-               VALUES ('supplier', ?, ?, ?)""",
-            (supplier_user_id, match_id, supplier_msg),
-        )
+        # Dedup: only insert if a notification for this user+match doesn't already exist
+        existing_c = conn.execute(
+            "SELECT id FROM notifications WHERE user_id=? AND match_id=? AND user_role='client'",
+            (client_user_id, match_id),
+        ).fetchone()
+        if not existing_c:
+            conn.execute(
+                """INSERT INTO notifications (user_role, user_id, match_id, message)
+                   VALUES ('client', ?, ?, ?)""",
+                (client_user_id, match_id, client_msg),
+            )
+
+        existing_s = conn.execute(
+            "SELECT id FROM notifications WHERE user_id=? AND match_id=? AND user_role='supplier'",
+            (supplier_user_id, match_id),
+        ).fetchone()
+        if not existing_s:
+            conn.execute(
+                """INSERT INTO notifications (user_role, user_id, match_id, message)
+                   VALUES ('supplier', ?, ?, ?)""",
+                (supplier_user_id, match_id, supplier_msg),
+            )
         conn.commit()
     finally:
         conn.close()

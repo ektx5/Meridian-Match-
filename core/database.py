@@ -26,15 +26,41 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Initialize database tables from schema.sql if not present."""
+    """Initialize database tables from schema.sql if not present; migrate existing DBs."""
     with open(SCHEMA_PATH, "r", encoding="utf-8") as fh:
         sql = fh.read()
     conn = get_connection()
     try:
         conn.executescript(sql)
         conn.commit()
+        # ── Graceful ALTER TABLE migrations for existing databases ────────────
+        _add_column_if_missing(conn, "matches", "product_fit_semantic_score", "REAL")
+        _add_column_if_missing(conn, "matches", "top_terms", "TEXT")
+        _add_column_if_missing(conn, "clients", "notification_email", "TEXT")
+        _add_column_if_missing(conn, "clients", "predicted_category", "TEXT")
+        _add_column_if_missing(conn, "clients", "category_confidence", "REAL")
+        _add_column_if_missing(conn, "suppliers", "notification_email", "TEXT")
+        _add_column_if_missing(conn, "suppliers", "predicted_category", "TEXT")
+        _add_column_if_missing(conn, "suppliers", "category_confidence", "REAL")
+        # learned_weights table is created via schema.sql; guard for pre-schema DBs
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS learned_weights (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               computed_at TEXT,
+               w_product REAL, w_category REAL, w_quantity REAL,
+               w_budget REAL, w_delivery REAL, w_location REAL
+            )"""
+        )
+        conn.commit()
     finally:
         conn.close()
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+    """Add a column to an existing table only if it doesn't already exist."""
+    existing = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
 
 # ── Users ──────────────────────────────────────────────────────────────────────
@@ -92,6 +118,9 @@ def save_or_update_client(
     user_id: int, company_name: str, product_requirement: str, category: str,
     quantity_required: float, quantity_unit: str, budget_min: float, budget_max: float,
     location: str, delivery_days: int, additional_notes: str,
+    notification_email: str | None = None,
+    predicted_category: str | None = None,
+    category_confidence: float | None = None,
 ) -> int:
     """Insert or update a client requirement profile and set profile_complete = 1."""
     conn = get_connection()
@@ -100,19 +129,23 @@ def save_or_update_client(
         if existing:
             conn.execute(
                 """UPDATE clients SET company_name=?, product_requirement=?, category=?, quantity_required=?,
-                   quantity_unit=?, budget_min=?, budget_max=?, location=?, delivery_days=?, additional_notes=?, profile_complete=1
+                   quantity_unit=?, budget_min=?, budget_max=?, location=?, delivery_days=?, additional_notes=?,
+                   notification_email=?, predicted_category=?, category_confidence=?, profile_complete=1
                    WHERE id=?""",
                 (company_name, product_requirement, category, quantity_required, quantity_unit,
-                 budget_min, budget_max, location, delivery_days, additional_notes, existing["id"]),
+                 budget_min, budget_max, location, delivery_days, additional_notes,
+                 notification_email, predicted_category, category_confidence, existing["id"]),
             )
             conn.commit()
             return existing["id"]
         cur = conn.execute(
             """INSERT INTO clients (user_id, company_name, product_requirement, category, quantity_required,
-               quantity_unit, budget_min, budget_max, location, delivery_days, additional_notes, profile_complete)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,1)""",
+               quantity_unit, budget_min, budget_max, location, delivery_days, additional_notes,
+               notification_email, predicted_category, category_confidence, profile_complete)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
             (user_id, company_name, product_requirement, category, quantity_required, quantity_unit,
-             budget_min, budget_max, location, delivery_days, additional_notes),
+             budget_min, budget_max, location, delivery_days, additional_notes,
+             notification_email, predicted_category, category_confidence),
         )
         conn.commit()
         return cur.lastrowid or 0
@@ -156,6 +189,9 @@ def save_or_update_supplier(
     user_id: int, supplier_name: str, product_offered: str, category: str,
     available_quantity: float, quantity_unit: str, price_min: float, price_max: float,
     location: str, delivery_days: int, additional_notes: str,
+    notification_email: str | None = None,
+    predicted_category: str | None = None,
+    category_confidence: float | None = None,
 ) -> int:
     """Insert or update a supplier offering profile and set profile_complete = 1."""
     conn = get_connection()
@@ -164,19 +200,23 @@ def save_or_update_supplier(
         if existing:
             conn.execute(
                 """UPDATE suppliers SET supplier_name=?, product_offered=?, category=?, available_quantity=?,
-                   quantity_unit=?, price_min=?, price_max=?, location=?, delivery_days=?, additional_notes=?, profile_complete=1
+                   quantity_unit=?, price_min=?, price_max=?, location=?, delivery_days=?, additional_notes=?,
+                   notification_email=?, predicted_category=?, category_confidence=?, profile_complete=1
                    WHERE id=?""",
                 (supplier_name, product_offered, category, available_quantity, quantity_unit,
-                 price_min, price_max, location, delivery_days, additional_notes, existing["id"]),
+                 price_min, price_max, location, delivery_days, additional_notes,
+                 notification_email, predicted_category, category_confidence, existing["id"]),
             )
             conn.commit()
             return existing["id"]
         cur = conn.execute(
             """INSERT INTO suppliers (user_id, supplier_name, product_offered, category, available_quantity,
-               quantity_unit, price_min, price_max, location, delivery_days, additional_notes, profile_complete)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,1)""",
+               quantity_unit, price_min, price_max, location, delivery_days, additional_notes,
+               notification_email, predicted_category, category_confidence, profile_complete)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
             (user_id, supplier_name, product_offered, category, available_quantity, quantity_unit,
-             price_min, price_max, location, delivery_days, additional_notes),
+             price_min, price_max, location, delivery_days, additional_notes,
+             notification_email, predicted_category, category_confidence),
         )
         conn.commit()
         return cur.lastrowid or 0
@@ -210,32 +250,59 @@ def upsert_match(
     category_score: float, quantity_score: float, budget_score: float,
     delivery_score: float, location_score: float, constraint_penalty_applied: int,
     explanation_text: str,
+    product_fit_semantic_score: float | None = None,
+    top_terms: str | None = None,
 ) -> int:
-    """Insert or update a match record for a client-supplier pair."""
+    """Insert or update a match record for a client-supplier pair.
+
+    Uses INSERT … ON CONFLICT(client_id, supplier_id) DO UPDATE SET so the row's
+    id stays STABLE across repeated matching runs.  INSERT OR REPLACE would
+    delete + re-insert, assigning a new id and orphaning any match_explanations rows.
+    """
     conn = get_connection()
     try:
-        existing = conn.execute("SELECT id FROM matches WHERE client_id=? AND supplier_id=?", (client_id, supplier_id)).fetchone()
-        params = (
-            overall_score, product_fit_score, category_score, quantity_score, budget_score,
-            delivery_score, location_score, constraint_penalty_applied, explanation_text, client_id, supplier_id,
-        )
-        if existing:
-            conn.execute(
-                """UPDATE matches SET overall_score=?, product_fit_score=?, category_score=?, quantity_score=?,
-                   budget_score=?, delivery_score=?, location_score=?, constraint_penalty_applied=?, explanation_text=?,
-                   created_at=CURRENT_TIMESTAMP WHERE client_id=? AND supplier_id=?""", params,
-            )
-            conn.commit()
-            return existing["id"]
+        # ON CONFLICT DO UPDATE preserves the row's id — INSERT OR REPLACE would
+        # delete+reinsert with a new id, orphaning match_explanations FK references.
         cur = conn.execute(
-            """INSERT INTO matches (overall_score, product_fit_score, category_score, quantity_score, budget_score,
-               delivery_score, location_score, constraint_penalty_applied, explanation_text, client_id, supplier_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""", params,
+            """INSERT INTO matches (
+                 client_id, supplier_id, overall_score, product_fit_score,
+                 category_score, quantity_score, budget_score, delivery_score,
+                 location_score, constraint_penalty_applied, explanation_text,
+                 product_fit_semantic_score, top_terms
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(client_id, supplier_id) DO UPDATE SET
+                 overall_score=excluded.overall_score,
+                 product_fit_score=excluded.product_fit_score,
+                 category_score=excluded.category_score,
+                 quantity_score=excluded.quantity_score,
+                 budget_score=excluded.budget_score,
+                 delivery_score=excluded.delivery_score,
+                 location_score=excluded.location_score,
+                 constraint_penalty_applied=excluded.constraint_penalty_applied,
+                 explanation_text=excluded.explanation_text,
+                 product_fit_semantic_score=excluded.product_fit_semantic_score,
+                 top_terms=excluded.top_terms,
+                 created_at=CURRENT_TIMESTAMP""",
+            (
+                client_id, supplier_id, overall_score, product_fit_score,
+                category_score, quantity_score, budget_score, delivery_score,
+                location_score, constraint_penalty_applied, explanation_text,
+                product_fit_semantic_score, top_terms,
+            ),
         )
         conn.commit()
-        return cur.lastrowid or 0
+        # lastrowid is the existing row id on conflict update, or new row id on insert
+        if cur.lastrowid:
+            return cur.lastrowid
+        # Fallback: fetch id (happens on some SQLite versions with DO UPDATE)
+        row = conn.execute(
+            "SELECT id FROM matches WHERE client_id=? AND supplier_id=?",
+            (client_id, supplier_id),
+        ).fetchone()
+        return row["id"] if row else 0
     finally:
         conn.close()
+
 
 
 def get_matches_for_client(client_id: int) -> list[sqlite3.Row]:
