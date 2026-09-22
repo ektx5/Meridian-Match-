@@ -104,12 +104,21 @@ def _score_delivery(c_days: int, s_days: int) -> float:
     return max(0.0, float(math.exp(-1.2 * excess_ratio)))
 
 
+def _get_city_state(city: str) -> str:
+    """Case-insensitive state lookup from LOCATION_STATES dictionary."""
+    clean = city.strip().lower()
+    for loc_name, state in LOCATION_STATES.items():
+        if loc_name.lower() == clean:
+            return state
+    return "Unknown"
+
+
 def _score_location(c_city: str, s_city: str) -> float:
     """Proximity score: Same city = 1.0, Same state = 0.6, Different state = 0.3."""
     if c_city.strip().lower() == s_city.strip().lower():
         return 1.0
-    c_state = LOCATION_STATES.get(c_city.strip(), "Unknown")
-    s_state = LOCATION_STATES.get(s_city.strip(), "Unknown")
+    c_state = _get_city_state(c_city)
+    s_state = _get_city_state(s_city)
     if c_state == s_state and c_state not in ("Unknown", "Other"):
         return 0.6
     return 0.3

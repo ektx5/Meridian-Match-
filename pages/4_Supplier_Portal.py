@@ -99,8 +99,17 @@ with tab_form:
             supplier_name = st.text_input("Supplier / Company Name *", value=supplier_row["supplier_name"] if supplier_row and supplier_row["supplier_name"] else username)
             cat_idx = CATEGORIES.index(supplier_row["category"]) if supplier_row and supplier_row["category"] in CATEGORIES else 0
             category = st.selectbox("Product Category *", CATEGORIES, index=cat_idx)
-            loc_idx = LOCATIONS.index(supplier_row["location"]) if supplier_row and supplier_row["location"] in LOCATIONS else 0
-            location = st.selectbox("Location (City) *", LOCATIONS, index=loc_idx)
+            saved_loc = supplier_row["location"] if supplier_row and supplier_row["location"] else ""
+            available_locs = list(LOCATIONS)
+            if saved_loc and saved_loc not in available_locs and saved_loc != "Other":
+                available_locs.insert(0, saved_loc)
+            loc_idx = available_locs.index(saved_loc) if saved_loc in available_locs else 0
+            location_sel = st.selectbox("Location (City) *", available_locs, index=loc_idx)
+            custom_city = st.text_input(
+                "Specify City (if not listed above / Other)",
+                value=saved_loc if saved_loc not in LOCATIONS and saved_loc != "Other" else "",
+                placeholder="e.g. Kharghar, Navi Mumbai",
+            )
 
         with c2:
             q_col, u_col = st.columns([2, 1])
@@ -140,8 +149,10 @@ with tab_form:
         submitted = st.form_submit_button("🔍 Submit & Find Client Matches", use_container_width=True)
 
     if submitted:
+        location = custom_city.strip() if (location_sel == "Other" or custom_city.strip()) else location_sel
         errors = []
         if not supplier_name.strip(): errors.append("Supplier Name is required.")
+        if not location.strip(): errors.append("Location (City) is required.")
         if available_quantity <= 0: errors.append("Available Quantity must be greater than 0.")
         if price_min <= 0 or price_max <= 0: errors.append("Price Min and Max must be greater than 0.")
         if price_min > price_max: errors.append("Price Min cannot exceed Price Max.")

@@ -35,23 +35,104 @@ CATEGORIES = [
 
 QUANTITY_UNITS = ["units", "kg", "tons", "boxes", "liters"]
 
-LOCATIONS = [
-    "Mumbai", "Delhi", "Bengaluru", "Chennai", "Hyderabad",
-    "Ahmedabad", "Pune", "Kolkata", "Jaipur", "Surat",
-    "Lucknow", "Kanpur", "Nagpur", "Visakhapatnam", "Bhopal",
-    "Coimbatore", "Vadodara", "Ludhiana", "Agra", "Other",
-]
-
 LOCATION_STATES: dict[str, str] = {
-    "Mumbai": "Maharashtra", "Pune": "Maharashtra", "Nagpur": "Maharashtra",
-    "Delhi": "Delhi", "Agra": "Uttar Pradesh", "Lucknow": "Uttar Pradesh",
-    "Kanpur": "Uttar Pradesh", "Bengaluru": "Karnataka",
-    "Chennai": "Tamil Nadu", "Coimbatore": "Tamil Nadu",
-    "Hyderabad": "Telangana", "Ahmedabad": "Gujarat",
-    "Surat": "Gujarat", "Vadodara": "Gujarat", "Kolkata": "West Bengal",
-    "Jaipur": "Rajasthan", "Visakhapatnam": "Andhra Pradesh",
-    "Bhopal": "Madhya Pradesh", "Ludhiana": "Punjab", "Other": "Other",
+    # Maharashtra / MMR
+    "Mumbai": "Maharashtra",
+    "Navi Mumbai": "Maharashtra",
+    "Kharghar": "Maharashtra",
+    "Thane": "Maharashtra",
+    "Kalyan": "Maharashtra",
+    "Pune": "Maharashtra",
+    "Nagpur": "Maharashtra",
+    "Nashik": "Maharashtra",
+    "Aurangabad": "Maharashtra",
+    "Chhatrapati Sambhajinagar": "Maharashtra",
+    "Kolhapur": "Maharashtra",
+    "Solapur": "Maharashtra",
+    # Delhi NCR / North
+    "Delhi": "Delhi",
+    "New Delhi": "Delhi",
+    "Noida": "Uttar Pradesh",
+    "Greater Noida": "Uttar Pradesh",
+    "Ghaziabad": "Uttar Pradesh",
+    "Gurgaon": "Haryana",
+    "Gurugram": "Haryana",
+    "Faridabad": "Haryana",
+    "Panipat": "Haryana",
+    "Chandigarh": "Chandigarh",
+    "Mohali": "Punjab",
+    "Ludhiana": "Punjab",
+    "Amritsar": "Punjab",
+    "Jalandhar": "Punjab",
+    "Dehradun": "Uttarakhand",
+    "Haridwar": "Uttarakhand",
+    "Jaipur": "Rajasthan",
+    "Jodhpur": "Rajasthan",
+    "Udaipur": "Rajasthan",
+    "Kota": "Rajasthan",
+    # Uttar Pradesh / Bihar / Central
+    "Lucknow": "Uttar Pradesh",
+    "Kanpur": "Uttar Pradesh",
+    "Agra": "Uttar Pradesh",
+    "Varanasi": "Uttar Pradesh",
+    "Prayagraj": "Uttar Pradesh",
+    "Meerut": "Uttar Pradesh",
+    "Bareilly": "Uttar Pradesh",
+    "Aligarh": "Uttar Pradesh",
+    "Patna": "Bihar",
+    "Gaya": "Bihar",
+    "Bhopal": "Madhya Pradesh",
+    "Indore": "Madhya Pradesh",
+    "Gwalior": "Madhya Pradesh",
+    "Jabalpur": "Madhya Pradesh",
+    "Raipur": "Chhattisgarh",
+    "Ranchi": "Jharkhand",
+    "Jamshedpur": "Jharkhand",
+    # Gujarat / West
+    "Ahmedabad": "Gujarat",
+    "Surat": "Gujarat",
+    "Vadodara": "Gujarat",
+    "Rajkot": "Gujarat",
+    "Gandhinagar": "Gujarat",
+    "Bhavnagar": "Gujarat",
+    # Karnataka / South
+    "Bengaluru": "Karnataka",
+    "Mysuru": "Karnataka",
+    "Mangaluru": "Karnataka",
+    "Hubballi": "Karnataka",
+    "Belagavi": "Karnataka",
+    # Tamil Nadu
+    "Chennai": "Tamil Nadu",
+    "Coimbatore": "Tamil Nadu",
+    "Madurai": "Tamil Nadu",
+    "Tiruppur": "Tamil Nadu",
+    "Salem": "Tamil Nadu",
+    "Tiruchirappalli": "Tamil Nadu",
+    # Telangana & Andhra Pradesh
+    "Hyderabad": "Telangana",
+    "Warangal": "Telangana",
+    "Visakhapatnam": "Andhra Pradesh",
+    "Vijayawada": "Andhra Pradesh",
+    "Guntur": "Andhra Pradesh",
+    "Tirupati": "Andhra Pradesh",
+    # Kerala
+    "Kochi": "Kerala",
+    "Thiruvananthapuram": "Kerala",
+    "Kozhikode": "Kerala",
+    # East / North-East
+    "Kolkata": "West Bengal",
+    "Howrah": "West Bengal",
+    "Durgapur": "West Bengal",
+    "Siliguri": "West Bengal",
+    "Bhubaneswar": "Odisha",
+    "Cuttack": "Odisha",
+    "Rourkela": "Odisha",
+    "Guwahati": "Assam",
+    # Fallback
+    "Other": "Other",
 }
+
+LOCATIONS: list[str] = sorted([k for k in LOCATION_STATES.keys() if k != "Other"]) + ["Other"]
 
 
 def inject_css() -> None:
